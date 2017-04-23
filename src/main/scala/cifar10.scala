@@ -10,7 +10,8 @@ object cifar10 {
   var W_af2 = new DenseMatrix[Double](100,10)
   var b_af2 = new DenseVector[Double](10)
 
-  var H = DenseVector.zeros[Double](9).map(a => rand.nextGaussian * 2 - 1) // フィルタ
+  var H = DenseVector.zeros[Double](9).map(a => rand.nextGaussian * 2 - 1) // フィルタ3x3
+  var H2 = DenseVector.zeros[Double](9).map(a => 1 - rand.nextGaussian * 2) // フィルタ3x3
   var b = 1d // バイアス
   var mu = 0.3 // 学習率
 
@@ -18,18 +19,29 @@ object cifar10 {
 
   class Convolution(var H:DenseVector[Double]) {// {{{
     //var H0 = H
-    var X0: DenseVector[Double] = null
-    var W: DenseMatrix[Double] = null
+    var X0 = new DenseVector[Double](0)
+    var W = new DenseMatrix[Double](0,0)
 
-    def forward(X:DenseVector[Double]) = {
-      X0 = X.copy
-      W = make_W(X,H)
-      val y = W * X :+ b
+    def forward(X:List[DenseVector[Double]]) = {
+      for(i <- 0 until X.size){
+        if(i == 0) {
+          W = make_W(X(i),H)
+          X0 = X(i)
+        }
+        else {
+          W = DenseMatrix.horzcat(W,make_W(X(i),H))
+          X0 = DenseVector.vertcat(X0,X(i))
+        }
+      }
+      //W = make_W(X(0),H)
+      //val y = W * X(0) :+ b
+      val y = W * X0 :+ b
       y
     }
 
     def backward(d:DenseVector[Double]) = {
       //val W = make_W(X0,H)
+      //val dW = d * X0(0).t
       val dW = d * X0.t
       val dH = DenseVector.zeros[Double](H.size)
       for(i <- 0 until dH.size){
@@ -108,7 +120,7 @@ object cifar10 {
   }
 
   def read(file:String): List[DenseVector[Double]] = {
-    // メモリ不足のため途中でtake(100)している
+    // TODO: take(100)を無くす。(メモリ不足のため途中でtake(100)している)
     // val r = io.Source.fromFile(file).getLines.toList.map(_.split(',').toList.map(_.toDouble))
     val r = io.Source.fromFile(file).getLines.toList.take(100).map(_.split(',').toList.map(_.toDouble))
 
@@ -169,9 +181,9 @@ object cifar10 {
       E = 0d
       println(s"--- ${cnt} ---")
 
-      for(i <- 0 until data.size){
+      for(i <- 0 until 30){ //TODO: 30 -> data.size
         // forward
-        var y = af2.forward(r2.forward(af1.forward(r1.forward(conv1.forward(r(i))))))
+        var y = af2.forward(r2.forward(af1.forward(r1.forward(conv1.forward(List(r(i),g(i),b(i)))))))
 
         // softmax
         val under = sum(y.map(exp))
@@ -189,7 +201,7 @@ object cifar10 {
       }
       cnt += 1
       println(E)
-    }while(E > 100 && cnt < 20)
+    }while(E > 50 && cnt < 5)
   }
 
   ////////////////////////////////////////////////////////
