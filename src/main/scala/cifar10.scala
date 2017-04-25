@@ -2,84 +2,86 @@ object cifar10 {
   import breeze.linalg._
   import math._
 
-  val rand = util.Random
-  rand.setSeed(0)
+  val rand = new util.Random(0)
 
-  val DATA_SIZE = 32*32
-  val FILTER_SIZE = 3*3
-  val AFTER_CONV_SIZE = pow( sqrt(DATA_SIZE) - sqrt(FILTER_SIZE) + 1 , 2 ).toInt //(32-3+1)^2=30*30=900
+  val xw = 32
+  val hw = 3
 
-  val READ_SIZE = 300
+  val DATA_SIZE = xw*xw
+  val FILTER_SIZE = hw*hw
+  val AFTER_CONV_SIZE = pow( xw - hw + 1 , 2 ).toInt //ex: (32-3+1)^2=30*30=900
 
-  val TRAINING_EPOCH = 5
+  var READ_SIZE = 500
 
-  var W_af1 = new DenseMatrix[Double](AFTER_CONV_SIZE,100)
-  var b_af1 = new DenseVector[Double](100)
+  var TRAINING_EPOCH = 10
+
+  var W_af1 = new DenseMatrix[Double](AFTER_CONV_SIZE,10)
+  var b_af1 = new DenseVector[Double](10)
   var W_af2 = new DenseMatrix[Double](100,10)
   var b_af2 = new DenseVector[Double](10)
 
-  var H1 = DenseVector.zeros[Double](FILTER_SIZE).map(a => rand.nextGaussian * 0.5) // フィルタ3x3
-  var H2 = DenseVector.zeros[Double](FILTER_SIZE).map(a => rand.nextGaussian) // フィルタ3x3
-  var H3 = DenseVector.zeros[Double](FILTER_SIZE).map(a => rand.nextGaussian + 1) // フィルタ3x3
-  var b = 1d // バイアス
-  var mu = 0.3 // 学習率
+  var H1 = DenseVector.zeros[Double](FILTER_SIZE).map(a => rand.nextGaussian * 0.01)
+  var H2 = DenseVector.zeros[Double](FILTER_SIZE).map(a => rand.nextGaussian * 0.01)
+  var H3 = DenseVector.zeros[Double](FILTER_SIZE).map(a => rand.nextGaussian * 0.01)
+  var H = Array(H1,H2,H3)
 
-  /////////////////////////////////////
+  var b = 0d // バイアス
+  var mu = 0.01 // 学習率
 
-  class Convolution(var H:Array[DenseVector[Double]]) {// {{{
-    //var H0 = H
-    var X0 = new Array[DenseVector[Double]](0)
-    var W = new Array[DenseMatrix[Double]](0)
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    def forward(X:List[DenseVector[Double]]) = {
-      X0 = new Array[DenseVector[Double]](0)
-      W = new Array[DenseMatrix[Double]](0)
+  class Convolution() {// {{{
+    var X0: Array[DenseVector[Double]] = null
+    var W:  Array[DenseMatrix[Double]] = null
 
-      var u = DenseVector.zeros[Double](900)
+    def forward(X:Array[DenseVector[Double]]) = {
+      // X0 = new Array[DenseVector[Double]](0)
+      // W = new Array[DenseMatrix[Double]](0)
+      X0 = new Array[DenseVector[Double]](X.size)
+      W = new Array[DenseMatrix[Double]](X.size)
+
+      var u = DenseVector.zeros[Double](AFTER_CONV_SIZE)
       for(i <- 0 until X.size){
-        X0 = X0 ++ Array(X(i))
-        W = W ++ Array(make_W(X(i),H(i)))
-        u += W(i) * X0(i)
+        //X0 = X0 ++ Array(X(i))
+        //W = W ++ Array(make_W(H(i)))
+        X0(i) = X(i)
+        W(i) = make_W(H(i))
+        u += W(i) * X(i)
       }
-      //W = make_W(X(0),H)
-      //val y = W * X(0) :+ b
       val y = u :+ b
       y
     }
 
     def backward(d:DenseVector[Double]) = {
-      //val W = make_W(X0,H)
-      //val dW = d * X0(0).t
-      for(i <- 0 until X0.size){
-        val dW = d * X0(i).t
-        val dH = DenseVector.zeros[Double](H(i).size)
-        for(j <- 0 until dH.size){
-          dH(j) = (Tr(j,W(i),H(i)) :* dW).sum
-        }
-        H(i) = H(i) - mu :* dH
-      }
-      b = b - mu * sum(d)/d.size
-
-      W(0).t * d
-    }
-
-    // Wを作る。 X:流れてきた画像データ H:フィルタ
-    def make_W(X:DenseVector[Double], H:DenseVector[Double]): DenseMatrix[Double] = {
-
-      val wx = sqrt(X.size).toInt
-      val wh = sqrt(H.size).toInt
-      var W = DenseMatrix.zeros[Double](pow(wx-wh+1,2).toInt, X.size)
-
-      for(i <- 0 until pow(wx-wh+1,2).toInt){
-        var flag = H.size
-        for(j <- 0 until X.size){
-          if(i < wx-wh+1 && j%wx+(wx-wh) < wx && flag > 0){
-            W(i,j+i%(wx-wh+1)+wx*(i/wh)) = H(H.size - flag)
-            flag -= 1
+      for(hi <- 0 until H.size){
+        var dW = d * X0(hi).t
+        for(i <- 0 until xw-hw+1){
+          for(j <- 0 until xw-hw+1){
+            for(p <- 0 until hw){
+              for(q <- 0 until hw){
+                H(hi)(p*hw+q) -= mu * dW(i*(xw-hw+1)+j,(i+p)*xw+j+q)
+              }
+            }
           }
         }
       }
 
+      b = b - mu * sum(d)
+      W(0).t * d
+    }
+
+    // Wを作る。 X:流れてきた画像データ H:フィルタ
+    def make_W(H:DenseVector[Double]): DenseMatrix[Double] = {
+      var W = DenseMatrix.zeros[Double](pow(xw-hw+1,2).toInt, DATA_SIZE)
+      for(i <- 0 until xw-hw+1){
+        for(j <- 0 until xw-hw+1){
+          for(p <- 0 until hw){
+            for(q <- 0 until hw){
+              W(i*(xw-hw+1)+j, (i+p)*xw+j+q) = H(p*hw+q)
+            }
+          }
+        }
+      }
       W
     }
 
@@ -110,6 +112,17 @@ object cifar10 {
     }
   }
 
+  class Sigmoid(){
+    var y0 :DenseVector[Double] = null
+    def forward(x:DenseVector[Double]) = {
+      y0 = x.map(a => 1/(1+exp(-a)))
+      y0
+    }
+
+    def backward(d:DenseVector[Double]) = {
+      d :* y0 :* (1d:-y0)
+    }
+  }
 
   class Affine(var W:DenseMatrix[Double], var b:DenseVector[Double]) {
     var X0: DenseVector[Double] = null
@@ -121,28 +134,26 @@ object cifar10 {
     def backward(d:DenseVector[Double]) = {
       val dW = DenseMatrix(X0).t * DenseMatrix(d)
       val dX = (d.t * W.t).t
-      val alpha = 0.05
+      //val alpha = 0.3
 
-      b -= d :* alpha
-      W += dW :* alpha
+      b -= d :* mu
+      W += dW :* mu
 
       dX
     }
   }
 
   def softmax(y:DenseVector[Double]) =  {
-      val m = y.max
-      val under = sum(y.map(a=>exp(a-m)))
+    val m = y.max
+    val under = sum(y.map(a=>exp(a-m)))
 
-      //debug
-      //println(s"softmax: y:$y\nm=$m, under:$under")
+    //debug
+    //println(s"softmax: y:$y\nm=$m, under:$under")
 
-      y.map( a => exp(a-m) / under )
+    y.map( a => exp(a-m) / under )
   }
 
-  def read(file:String): List[DenseVector[Double]] = {
-    // TODO: take(100)を無くす。(メモリ不足のため途中でtake(100)している)
-    // val r = io.Source.fromFile(file).getLines.toList.map(_.split(',').toList.map(_.toDouble))
+  def read(file:String) = {
     val r = io.Source.fromFile(file).getLines.toList.take(READ_SIZE).map(_.split(',').toList.map(_.toDouble))
 
     var list = List[DenseVector[Double]]()
@@ -151,10 +162,31 @@ object cifar10 {
       for(j <- 0 until r(0).size){
         li(j) = r(i)(j)
       }
-      list = list ++ List(li)
+      list = li :: list
     }
-    list
+    list.reverse.toArray
   }
+
+
+  def read_l(file:String) = {
+    val f = io.Source.fromFile(file).getLines.toArray.take(READ_SIZE) /* TODO: remove take_size */
+
+    /* labo */
+    val ff = f.map(_.split(",").map(_.toDouble/256d).toArray).toArray
+    val r = ff.map(a => (0 until a.size by 3).map(k => a(k)).toArray)
+    val g = ff.map(a => (1 until a.size by 3).map(k => a(k)).toArray)
+    val b = ff.map(a => (2 until a.size by 3).map(k => a(k)).toArray)
+
+    var list = List[DenseVector[Double]]()
+    for(i <- 0 until ff.size){
+      var li = DenseVector.vertcat(DenseVector.vertcat(DenseVector(r(i)),DenseVector(g(i))), DenseVector(b(i)))
+
+      list = li :: list
+    }
+
+    list.reverse.toArray
+  }
+
 
   def one_of_k(x:Int) = {
     var res : DenseVector[Double] = null
@@ -178,37 +210,42 @@ object cifar10 {
 
   def train() = {
     // Affine層の重みとバイアスの初期化
-    W_af1 = W_af1.map(a => rand.nextGaussian * 0.5)
-    b_af1 = b_af1.map(a => rand.nextGaussian * 0.5)
-    W_af2 = W_af2.map(a => rand.nextGaussian * 0.5)
-    b_af2 = b_af2.map(a => rand.nextGaussian * 0.5)
+    W_af1 = W_af1.map(a => rand.nextGaussian)
+    b_af1 = b_af1.map(a => rand.nextGaussian)
+    W_af2 = W_af2.map(a => rand.nextGaussian * 5)
+    b_af2 = b_af2.map(a => rand.nextGaussian * 5)
 
-    val conv1 = new Convolution(Array(H1,H2,H3))
+    val conv1 = new Convolution()
     val af1 = new Affine(W_af1,b_af1)
     val af2 = new Affine(W_af2,b_af2)
-    val r1 = new ReLU()
-    val r2 = new ReLU()
+    val f1 = new Sigmoid()
+    val f2 = new Sigmoid()
 
-    var E = 0d //-1 * sum(correct :* y.map(log))
-    val eps = 0.0000001 //log(0) = -Infinity, log(-i) = NaN (i>0) を避けるため
+    var E = 0d
+    val eps = 0.00001 //log(0) = -Infinity, log(-i) = NaN (i>0) を避けるため
     var cnt = 0
 
-    // メモリ不足のため100個分のデータを読み込んでいる
     val data = read("/home/yuya/labo/cifar10/data/train-d1.txt")
-    val List(labels) = read("/home/yuya/labo/cifar10/data/train-t1.txt")
-    // r,g,b に分ける。(家)
+    val Array(labels) = read("/home/yuya/labo/cifar10/data/train-t1.txt")
+
+    // r,g,b に分ける
     val (r,g,b) = (data.map(_(0 until 1024)),data.map(_(1024 until 2048)),data.map(_(2048 until 3072)))
+
+    //debug
+    println(s"\nH1 = ${H1}\nH2 = ${H2}\nH3 = ${H3}")
 
     do{
       E = 0d
       println(s"--- ${cnt} ---")
 
-      for(i <- 0 until data.size){ //TODO: 30 -> data.size
+      for(i <- 0 until data.size){
         //debug
-        if(i%20==0) println(s"now training... (${i}/${data.size})")
+        if(i%(READ_SIZE/5)==0) println(s"now training... (${i}/${data.size})")
 
         // forward
-        var y = af2.forward(r2.forward(af1.forward(r1.forward(conv1.forward(List(r(i),g(i),b(i)))))))
+        //var y = af2.forward(f2.forward(af1.forward(f1.forward(conv1.forward(Array(r(i),g(i),b(i)))))))
+        var y = f1.forward(af1.forward(conv1.forward(Array(r(i),g(i),b(i)))))
+
 
         // softmax
         y = softmax(y)
@@ -221,36 +258,43 @@ object cifar10 {
         val dE = y - correct
 
         // backward
-        conv1.backward(r1.backward(af1.backward(r2.backward(af2.backward(dE)))))
+        //conv1.backward(f1.backward(af1.backward(f2.backward(af2.backward(dE)))))
+        conv1.backward(af1.backward(f1.backward(dE)))
 
         //debug
-        //if(i%20==0) println(s"y${i}: ${y}\ncorrect${i}: ${correct}\nE${i}: ${E}")
-        //debug
-        if(i%20==0) println(s"E${i}: ${E}")
-
+        if(i%(READ_SIZE/5)==0) println(s"E${i}: ${E}")
       }
       cnt += 1
-      println(E)
-    }while(E > 50 && cnt < TRAINING_EPOCH)
+      println(s"E = ${E}")
+
+      //debug
+      println(s"\nH1 = ${H1}\nH2 = ${H2}\nH3 = ${H3}\nb = $b")
+      println(s"\nW1 = ${W_af1}\n b1=${b_af1}")
+    }while(E > READ_SIZE * 1.5 && cnt < TRAINING_EPOCH)
+
+    println("finish training\n")
   }
 
   ////////////////////////////////////////////////////////
 
   def ask(target:DenseVector[Double], correct:Int) = {
-    val conv1 = new Convolution(Array(H1,H2,H3))
+    val conv1 = new Convolution()
     val af1 = new Affine(W_af1,b_af1)
     val af2 = new Affine(W_af2,b_af2)
-    val r1 = new ReLU()
-    val r2 = new ReLU()
+    val f1 = new Sigmoid()
+    val f2 = new Sigmoid()
 
     val r = target(0 until 1024)
     val g = target(1024 until 2048)
     val b = target(2048 until 3072)
 
     // forward
-    var y = af2.forward(r2.forward(af1.forward(r1.forward(conv1.forward(List(r,g,b))))))
-    // softmax
+    //var y = af2.forward(f2.forward(af1.forward(f1.forward(conv1.forward(Array(r,g,b))))))
+    var y = f1.forward(af1.forward(conv1.forward(Array(r,g,b))))
+
     y = softmax(y)
+
+    println(s"y: $y")
 
     val predict_number = y.toArray.indexOf(y.max)
 
@@ -262,7 +306,7 @@ object cifar10 {
 
   def test() = {
     val data = read("/home/yuya/labo/cifar10/data/test-d.txt")
-    val List(labels) = read("/home/yuya/labo/cifar10/data/test-t.txt")
+    val Array(labels) = read("/home/yuya/labo/cifar10/data/test-t.txt")
 
     var correct = 0d
     for(i <- 0 until data.size){
@@ -277,16 +321,10 @@ object cifar10 {
 
   def main(args: Array[String]) {
 
-    // 入力画像の代わり
-    // val fake = DenseVector.zeros[Double](32*32).map(a => rand.nextGaussian)
-    // println(conv1.forward(fake))
-
-    // メモリ不足のため100個分のデータを読み込んでいる
-    // val data = read("/home/yuya/labo/cifar10/data/train-d1.txt")
-    // println(conv1.forward(data(20)(0 until 1024)))
-
     train()
     test()
+
+    println(s"Read Size: ${READ_SIZE}, Filter: ${hw}*${hw}, Train Rate: ${mu}, Train Loop: ${TRAINING_EPOCH}")
 
     println("\nOk.\n")
   }
